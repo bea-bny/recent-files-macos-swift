@@ -1,6 +1,7 @@
 # Recent Files for macOS
 
-Recent Files gives you a live view of files you’ve just created or modified, so you can get back to them without searching through Finder. Choose the folders and time range to watch, then search, reveal a file in Finder, or copy its path. Everything runs locally on your Mac.
+Recent Files opens with a keyboard shortcut whenever you need it, then gets out of your way when you’re done. 
+It gives you a live view of files you’ve just created or modified, so you can get back to them without searching through Finder. Choose which folders and time range to watch, then search, reveal a file in Finder, or copy its path. Everything runs locally on your Mac.
 
 ## Screenshots
 
