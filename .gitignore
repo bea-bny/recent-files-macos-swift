@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+**/Pods/
+**/xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.log
+*.swp
+*.iml
