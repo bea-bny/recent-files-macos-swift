@@ -1,6 +1,6 @@
 # Recent Files for macOS
 
-A native macOS utility built with SwiftUI and AppKit. It watches the top level of configured folders (Downloads and Desktop by default), shows files modified or created within the selected time period, and provides search, Finder reveal, copy path, appearance, login item, and global shortcut settings.
+Recent Files gives you a live view of files you’ve just created or modified, so you can get back to them without searching through Finder. Choose the folders and time range to watch, then search, reveal a file in Finder, or copy its path. Everything runs locally on your Mac.
 
 ## Screenshots
 
