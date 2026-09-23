@@ -12,7 +12,12 @@ xcodebuild -project macos/RecentFiles.xcodeproj -scheme RecentFiles -configurati
 
 ## Install
 
-Download the latest `Recent Files-macOS.dmg` from GitHub Releases, open the disk image, and drag `Recent Files.app` to Applications. This release is ad-hoc signed and is not notarized; macOS may require opening it from Finder's context menu the first time.
+1. Download the latest `Recent Files-macOS.dmg` from GitHub Releases.
+2. Open the DMG and drag `Recent Files.app` to Applications.
+3. Before opening the app, go to System Settings → Privacy & Security → Accessibility. Click `+`, select `Recent Files.app` from Applications, and enable it.
+4. Open Recent Files from Applications.
+
+Accessibility access is required for the global keyboard shortcut. If macOS blocks the first launch, Control-click the app, choose Open, then confirm.
 
 The deployment target remains macOS 12.0. The launch-at-login option uses `SMAppService` and is available on macOS 13 and later.
 
