@@ -2,6 +2,16 @@
 
 A native macOS utility built with SwiftUI and AppKit. It watches the top level of configured folders (Downloads and Desktop by default), shows files modified or created within the selected time period, and provides search, Finder reveal, copy path, appearance, login item, and global shortcut settings.
 
+## Screenshots
+
+### Light mode
+![Recent Files — light mode](assets/recent-files-visual-light%20(1).png)
+![Recent Files — light mode, screen 2](assets/recent-files-visual-light2.png)
+
+### Dark mode
+![Recent Files — dark mode](assets/recent-files-visual-dark%20(1).png)
+![Recent Files — dark mode, screen 2](assets/recent-files-visual-dark2.png)
+
 ## Build
 
 Open `macos/RecentFiles.xcodeproj` in Xcode and build the `RecentFiles` scheme, or run:
