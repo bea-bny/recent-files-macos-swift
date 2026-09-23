@@ -30,7 +30,15 @@ struct RecentFilesApp: App {
     private func updateApplicationIcon(dark: Bool) {
         let name = dark ? "RecentFiles-icon-dark" : "RecentFiles-icon-light"
         guard let url = Bundle.main.url(forResource: name, withExtension: "png"), let image = NSImage(contentsOf: url) else { return }
-        NSApp.applicationIconImage = image
+        let sourceSize = image.size
+        let iconSize = NSSize(width: 512, height: 512)
+        let iconFrame = NSRect(origin: .zero, size: iconSize)
+        let roundedIcon = NSImage(size: iconSize)
+        roundedIcon.lockFocus()
+        NSBezierPath(roundedRect: iconFrame, xRadius: iconSize.width * 0.22, yRadius: iconSize.height * 0.22).addClip()
+        image.draw(in: iconFrame, from: NSRect(origin: .zero, size: sourceSize), operation: .copy, fraction: 1)
+        roundedIcon.unlockFocus()
+        NSApp.applicationIconImage = roundedIcon
     }
 
     private func makeWindow() {
@@ -38,6 +46,8 @@ struct RecentFilesApp: App {
         let hosting = NSHostingView(rootView: root)
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        hosting.layer?.cornerRadius = 35
+        hosting.layer?.masksToBounds = true
         window = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 490, height: 430), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = hosting
         window.isOpaque = false
@@ -110,6 +120,9 @@ struct RecentEntry: Identifiable, Hashable {
     @Published var dark = false
     var onThemeChange: ((Bool) -> Void)?
     private var timers: [any DispatchSourceFileSystemObject] = []
+    private var refreshWorkItem: DispatchWorkItem?
+    private var isRefreshing = false
+    private var refreshAgain = false
     private let defaults = UserDefaults(suiteName: "com.example.recentFiles1") ?? .standard
     private let maxAge: TimeInterval = 30 * 86400
     func start() {
@@ -127,11 +140,16 @@ struct RecentEntry: Identifiable, Hashable {
     func setDark(_ value: Bool) { dark = value; defaults.set(value, forKey: "dark_theme"); onThemeChange?(value) }
     func query(_ text: String, period: TimeInterval) -> [RecentEntry] {
         let cutoff = Date().addingTimeInterval(-min(period, maxAge))
-        return files.filter { $0.date >= cutoff && (text.isEmpty || $0.name.localizedCaseInsensitiveContains(text)) }.sorted { $0.date > $1.date }
+        return files.filter { $0.date >= cutoff && (text.isEmpty || $0.name.localizedCaseInsensitiveContains(text)) }
     }
     func refresh() {
+        guard !isRefreshing else {
+            refreshAgain = true
+            return
+        }
+        isRefreshing = true
         let roots = folders
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let now = Date()
             var result: [String: RecentEntry] = [:]
             for root in roots {
@@ -145,19 +163,42 @@ struct RecentEntry: Identifiable, Hashable {
                     result[url.path] = RecentEntry(path: url.path, action: action, date: modified)
                 }
             }
-            DispatchQueue.main.async { self.files = result.values.sorted { $0.date > $1.date } }
+            let sorted = result.values.sorted { $0.date > $1.date }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.files = sorted
+                self.isRefreshing = false
+                if self.refreshAgain {
+                    self.refreshAgain = false
+                    self.refresh()
+                }
+            }
         }
     }
     nonisolated private static func ignored(_ name: String) -> Bool { name.hasPrefix(".") || [".crdownload", ".download", ".part", ".tmp", ".partial", "~"].contains(where: name.hasSuffix) }
     private func watchFolders() {
+        refreshWorkItem?.cancel()
+        refreshWorkItem = nil
         timers.forEach { $0.cancel() }; timers.removeAll()
         for folder in folders where FileManager.default.fileExists(atPath: folder) {
             let fd = open(folder, O_EVTONLY)
             guard fd >= 0 else { continue }
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .global(qos: .utility))
-            source.setEventHandler { [weak self] in DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.refresh() } }
+            source.setEventHandler { [weak self] in
+                DispatchQueue.main.async { self?.scheduleRefresh() }
+            }
             source.setCancelHandler { close(fd) }; source.resume(); timers.append(source)
         }
+    }
+    private func scheduleRefresh() {
+        refreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.refreshWorkItem = nil
+            self.refresh()
+        }
+        refreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
     }
 }
 
@@ -289,7 +330,6 @@ final class GlobalHotKey {
         return out + (map[keyCode] ?? "Key \(keyCode)")
     }
     static func macKeyCode(fromUSB usage: UInt32) -> UInt32 {
-        // The earlier shortcut preference stores a USB HID usage; Carbon needs a Mac virtual key code.
         let map: [UInt32: UInt32] = [4:0,5:11,6:8,7:2,8:14,9:3,10:5,11:4,12:34,13:38,14:40,15:37,16:46,17:45,18:31,19:35,20:12,21:15,22:1,23:17,24:32,25:9,26:13,27:7,28:16,29:6,30:18,31:19,32:20,33:21,34:23,35:22,36:26,37:28,38:25,39:29,40:36,41:53,42:51,43:48,44:49]
         return map[usage] ?? usage
     }
@@ -317,7 +357,6 @@ struct RootView: View {
     @State private var shortcutCapture = false
     @State private var errorMessage: String?
     @State private var login = false
-    @State private var hoveredFiles: Set<String> = []
     @State private var hoveredPeriods: Set<Int> = []
     @State private var hotkeyLabel = "⌥Space"
     @FocusState private var searchFocused: Bool
@@ -405,33 +444,37 @@ struct RootView: View {
         }
     }
     private func fileRow(_ file: RecentEntry) -> some View {
-        HStack(spacing: 12) {
-            thumbnail(file).frame(width: 40, height: 40).background(colors.thumb).clipShape(RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(colors.border, lineWidth: 1))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.name).font(.system(size: 14, weight: .medium)).foregroundColor(colors.text).lineLimit(1)
-                Text(file.path).font(.system(size: 10)).foregroundColor(colors.secondary).lineLimit(1).truncationMode(.middle)
-                Text("\(timeString(file.date)) · \(file.action)").font(.system(size: 10)).foregroundColor(colors.muted).lineLimit(1)
-            }.contentShape(Rectangle()).onTapGesture { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() }
-            Spacer(minLength: 2)
-            Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() } label: { Image(systemName: "folder").foregroundColor(colors.secondary) }.buttonStyle(SoftBounceButtonStyle()).help("Reveal in Finder")
-            Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(file.path, forType: .string); withAnimation(.easeInOut(duration: 0.2)) { toast = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation { toast = false } } } label: { Image(systemName: "doc.on.doc").foregroundColor(colors.secondary) }.buttonStyle(SoftBounceButtonStyle()).help("Copy path")
-        }.padding(.horizontal, 10).frame(height: 56)
-            .background(hoveredFiles.contains(file.path) ? colors.selected.opacity(0.55) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 15))
-            .contentShape(Rectangle())
-            .scaleEffect(hoveredFiles.contains(file.path) ? 1.012 : 1)
-            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: hoveredFiles.contains(file.path))
-            .onHover { hovering in
-                if hovering { hoveredFiles.insert(file.path) } else { hoveredFiles.remove(file.path) }
+        HoverTrackingRow(colors: colors) {
+            HStack(spacing: 12) {
+                fileIcon(file).frame(width: 40, height: 40).background(colors.thumb).clipShape(RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(colors.border, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.name).font(.system(size: 14, weight: .medium)).foregroundColor(colors.text).lineLimit(1)
+                    Text(file.path).font(.system(size: 10)).foregroundColor(colors.secondary).lineLimit(1).truncationMode(.middle)
+                    Text("\(timeString(file.date)) · \(file.action)").font(.system(size: 10)).foregroundColor(colors.muted).lineLimit(1)
+                }.contentShape(Rectangle()).onTapGesture { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() }
+                Spacer(minLength: 2)
+                Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() } label: { Image(systemName: "folder").foregroundColor(colors.secondary) }.buttonStyle(SoftBounceButtonStyle()).help("Reveal in Finder")
+                Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(file.path, forType: .string); withAnimation(.easeInOut(duration: 0.2)) { toast = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation { toast = false } } } label: { Image(systemName: "doc.on.doc").foregroundColor(colors.secondary) }.buttonStyle(SoftBounceButtonStyle()).help("Copy path")
             }
-            .contextMenu { Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() }; Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(file.path, forType: .string); withAnimation { toast = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation { toast = false } } } }
+        }
+        .contextMenu { Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]); close() }; Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(file.path, forType: .string); withAnimation { toast = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation { toast = false } } } }
     }
-    @ViewBuilder private func thumbnail(_ f: RecentEntry) -> some View {
-        if ["png","jpg","jpeg","gif","webp","bmp","heic","tiff"].contains(f.ext), let image = NSImage(contentsOfFile: f.path) { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
-        else { Image(systemName: icon(for: f.ext)).font(.system(size: 21)).foregroundColor(colors.accent) }
+    private func fileIcon(_ file: RecentEntry) -> some View {
+        Image(systemName: icon(for: file.ext)).font(.system(size: 21)).foregroundColor(colors.accent)
     }
     private func icon(for ext: String) -> String {
-        switch ext { case "pdf": return "doc.richtext"; case "xlsx","xls","csv","numbers": return "tablecells"; case "doc","docx","pages","txt": return "doc.text"; case "ppt","pptx","key": return "rectangle.on.rectangle"; case "zip","rar","7z","gz": return "archivebox"; case "mp3","wav","m4a": return "music.note"; case "mp4","mov","mkv": return "film"; case "dmg","pkg": return "shippingbox"; default: return "doc" }
+        switch ext {
+        case "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "tiff": return "photo"
+        case "pdf": return "doc.richtext"
+        case "xlsx", "xls", "csv", "numbers": return "tablecells"
+        case "doc", "docx", "pages", "txt", "rtf", "md": return "doc.text"
+        case "ppt", "pptx", "key": return "rectangle.on.rectangle"
+        case "zip", "rar", "7z", "gz", "tar": return "archivebox"
+        case "mp3", "wav", "m4a", "aiff", "flac": return "music.note"
+        case "mp4", "mov", "mkv", "avi": return "film"
+        case "dmg", "pkg": return "shippingbox"
+        default: return "doc"
+        }
     }
     private var settingsView: some View {
         VStack(spacing: 12) {
@@ -472,6 +515,29 @@ struct RootView: View {
     }
     private func timeString(_ date: Date) -> String {
         let cal = Calendar.current; let now = Date(); if now.timeIntervalSince(date) < 60 { return "Just now" }; if now.timeIntervalSince(date) < 3600 { return "\(Int(now.timeIntervalSince(date) / 60)) min ago" }; let f = DateFormatter(); f.dateFormat = cal.isDateInToday(date) ? "'Today,' HH:mm" : (cal.isDateInYesterday(date) ? "'Yesterday,' HH:mm" : "d MMM, HH:mm"); return f.string(from: date)
+    }
+}
+
+private struct HoverTrackingRow<Content: View>: View {
+    let colors: Palette
+    let content: Content
+    @State private var isHovered = false
+
+    init(colors: Palette, @ViewBuilder content: () -> Content) {
+        self.colors = colors
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(.horizontal, 10)
+            .frame(height: 56)
+            .background(isHovered ? colors.selected.opacity(0.55) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+            .contentShape(Rectangle())
+            .scaleEffect(isHovered ? 1.012 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isHovered)
+            .onHover { isHovered = $0 }
     }
 }
 
