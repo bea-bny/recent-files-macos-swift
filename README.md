@@ -32,5 +32,3 @@ Accessibility access is required for the global keyboard shortcut. If macOS bloc
 The deployment target remains macOS 12.0. The launch-at-login option uses `SMAppService` and is available on macOS 13 and later.
 
 The global shortcut uses a local macOS event tap so another app cannot respond to the same selected combination. macOS requires the user to grant Recent Files Accessibility access for this feature; the app only handles key codes and modifier flags, and does not record or transmit typed text. The supplied light and dark logos are bundled separately: the main view and running Dock icon follow the app's selected theme.
-
-Existing preferences are read from the prior app's `com.example.recentFiles1` UserDefaults domain. Folder paths, theme, and keyboard shortcut are retained; recent file entries are rebuilt from the watched folders as before.
