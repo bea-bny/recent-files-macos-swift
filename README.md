@@ -5,11 +5,11 @@ A native macOS utility built with SwiftUI and AppKit. It watches the top level o
 ## Screenshots
 
 ### Light mode
-![Recent Files — light mode](assets/recent-files-visual-light%20(1).png)
+![Recent Files — light mode](<assets/recent-files-visual-light (1).png>)
 ![Recent Files — light mode, screen 2](assets/recent-files-visual-light2.png)
 
 ### Dark mode
-![Recent Files — dark mode](assets/recent-files-visual-dark%20(1).png)
+![Recent Files — dark mode](<assets/recent-files-visual-dark1 (1).png>)
 ![Recent Files — dark mode, screen 2](assets/recent-files-visual-dark2.png)
 
 ## Build
